@@ -14,11 +14,17 @@ app.get("/", (req, res) => {
 });
 
 // WiFleet webhooks
-app.post("/webhooks/:event", (req, res) => {
+app.all("/webhooks/:event", (req, res) => {
+  const auth = req.headers.authorization;
+  if (!auth || auth !== `Bearer ${process.env.WIFLEET_BEARER_KEY}`) {
+    console.log("❌ Unauthorized webhook");
+    return res.status(401).send("Unauthorized");
+  }
   console.log("✅ Received WiFleet event:", req.params.event);
   console.log(req.body);
   res.status(200).json({ success: true });
 });
+
 
 // API for Shopify page to read data
 app.get("/api/tracking", (req, res) => {
