@@ -7,20 +7,31 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 
 app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
+app.use(express.urlencoded({ extended: true })); // ➕ in case WiFleet posts form-encoded
+
+const mask = (s="") => (s.length<=8 ? "****" : `${s.slice(0,4)}…${s.slice(-4)} (${s.length})`);
+const normalizeAuth = (h="") => { const m = h.trim().match(/^(Bearer|Token)\s+(.+)$/i); return (m?m[2]:h).trim(); };
 
 app.get("/", (_req, res) => res.send("✅ WiFleet-Connector running"));
 
+/* ➕ TEMP DEBUG: No auth, logs everything so we can see exactly what WiFleet sends */
+app.all("/webhooks-debug/:event", (req, res) => {
+  console.log("🐞 DEBUG hit:", req.params.event, req.method);
+  console.log("Headers:", req.headers);
+  console.log("Body:", req.body);
+  res.status(200).json({ ok: true, debug: true });
+});
+
 app.all("/webhooks/:event", (req, res) => {
   const expected = (process.env.WIFLEET_BEARER_KEY || "").trim();
-  const header = (req.headers.authorization || "").trim();
-  const got = header.replace(/^Bearer\s+/i, "").trim();
+  const got = normalizeAuth(req.headers.authorization || "");
 
+  console.log(`🔎 Parsed token: ${mask(got)} | Expected: ${mask(expected)}`);
   if (!expected || !got || got !== expected) {
     console.log("❌ Unauthorized webhook (bearer mismatch)");
     return res.status(401).send("Unauthorized");
   }
 
-  // Optional HMAC (only if WiFleet sends one)
   const sig = req.headers["x-wifleet-signature"] || req.headers["x-signature"] || req.headers["x-hub-signature-256"];
   const secret = (process.env.WIFLEET_SECRET_KEY || "").trim();
   if (sig && secret) {
@@ -30,8 +41,8 @@ app.all("/webhooks/:event", (req, res) => {
   }
 
   console.log(`✅ Received WiFleet event: ${req.params.event} (${req.method})`);
-  console.log("Body:", JSON.stringify(req.body));
-  return res.status(200).json({ ok: true });
+  console.log("Body:", req.body);
+  res.status(200).json({ ok: true });
 });
 
 app.get("/api/tracking", (req, res) => {
