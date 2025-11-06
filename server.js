@@ -1,28 +1,25 @@
-// server.js
-import express from "express";
-import dotenv from "dotenv";
-import crypto from "crypto";
+// server.js (CommonJS)
+const express = require("express");
+const crypto = require("crypto");
+require("dotenv").config();
 
-dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 10000;
 
 app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: true }));
 
-/** ===== In-memory store & SSE listeners ===== */
-const store = new Map();              // orderKey -> {status, driverName, driverPhone, lat, lng, etaMinutes, timeline[], updatedAt}
-const listeners = new Map();          // orderKey -> Set(res)
+// ===== In-memory store & SSE listeners =====
+const store = new Map();     // orderKey -> { status, driverName, driverPhone, lat, lng, etaMinutes, timeline[], updatedAt }
+const listeners = new Map(); // orderKey -> Set(res)
 
 const nowISO = () => new Date().toISOString();
 
 function broadcast(order, payload) {
   const set = listeners.get(order);
-  if (!set || set.size === 0) return;
+  if (!set || !set.size) return;
   const data = `data: ${JSON.stringify(payload)}\n\n`;
-  for (const res of set) {
-    try { res.write(data); } catch (_) {}
-  }
+  for (const res of set) { try { res.write(data); } catch (_) {} }
 }
 
 function upsert(order, patch, timelineLabel = null) {
@@ -38,9 +35,7 @@ function upsert(order, patch, timelineLabel = null) {
     ...patch,
     updatedAt: nowISO(),
   };
-  if (timelineLabel) {
-    next.timeline.push({ ts: nowISO(), label: timelineLabel });
-  }
+  if (timelineLabel) next.timeline.push({ ts: nowISO(), label: timelineLabel });
   store.set(order, next);
   broadcast(order, { order, ...next });
   return next;
@@ -64,10 +59,10 @@ function statusToLabel(s) {
   return null;
 }
 
-/** ===== Health ===== */
-app.get("/", (_req, res) => res.send("✅ WiFleet-Connector running"));
+// Health
+app.get("/", (_req, res) => res.send("✅ WiFleet-Connector running (CommonJS)"));
 
-/** ===== Secure webhooks from WiFleet ===== */
+// Secure WiFleet webhooks
 app.all("/webhooks/:event", (req, res) => {
   const expected = (process.env.WIFLEET_BEARER_KEY || "").trim();
   const got = normalizeAuth(req.headers.authorization || "");
@@ -76,7 +71,6 @@ app.all("/webhooks/:event", (req, res) => {
     return res.status(401).send("Unauthorized");
   }
 
-  // Optional HMAC verify (if WiFleet sends signature)
   const sig = req.headers["x-wifleet-signature"] || req.headers["x-signature"] || req.headers["x-hub-signature-256"];
   const secret = (process.env.WIFLEET_SECRET_KEY || "").trim();
   if (sig && secret) {
@@ -87,8 +81,8 @@ app.all("/webhooks/:event", (req, res) => {
 
   const b = req.body || {};
   const order = pickKey(b);
-  console.log(`✅ Received WiFleet event: ${req.params.event} for`, order);
-  // Map incoming payload to our fields
+  console.log(`✅ WiFleet event: ${req.params.event} for`, order);
+
   const raw = (b.status || b.task_status || "").toString();
   const label = statusToLabel(raw);
   const patch = {
@@ -105,16 +99,12 @@ app.all("/webhooks/:event", (req, res) => {
     etaMinutes  : b.eta_minutes ?? b.eta ?? undefined,
   };
 
-  if (!order) {
-    console.log("ℹ️ No task identifier in payload");
-    return res.status(200).json({ ok: true, note: "no task id in payload" });
-  }
-
+  if (!order) return res.status(200).json({ ok: true, note: "no task id in payload" });
   upsert(order, patch, label);
   return res.status(200).json({ ok: true });
 });
 
-/** ===== REST: current snapshot ===== */
+// Snapshot API
 app.get("/api/tracking", (req, res) => {
   const order = (req.query.order || "").toString().trim();
   if (!order) return res.status(400).json({ error: "missing order" });
@@ -122,7 +112,7 @@ app.get("/api/tracking", (req, res) => {
   res.json({ order, ...data });
 });
 
-/** ===== SSE: live stream ===== */
+// SSE events
 app.get("/events", (req, res) => {
   const order = (req.query.order || "").toString().trim();
   if (!order) return res.status(400).end();
@@ -131,11 +121,9 @@ app.get("/events", (req, res) => {
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
 
-  // Send current state immediately
   const snapshot = store.get(order) || { status: "pending", timeline: [] };
   res.write(`data: ${JSON.stringify({ order, ...snapshot })}\n\n`);
 
-  // Register listener
   if (!listeners.has(order)) listeners.set(order, new Set());
   const set = listeners.get(order);
   set.add(res);
@@ -146,7 +134,7 @@ app.get("/events", (req, res) => {
   });
 });
 
-/** ===== Embedded widget (live, timeline, driver, map) ===== */
+// Widget (embedded UI)
 app.get("/widget", (req, res) => {
   const order = (req.query.order || "").toString().trim();
   const brand = "mobile2000";
@@ -202,22 +190,16 @@ app.get("/widget", (req, res) => {
 const order = ${JSON.stringify(order)};
 const $ = s => document.querySelector(s);
 
-function setStatus(s){
-  $("#status").textContent = s;
-}
+function setStatus(s){ $("#status").textContent = s; }
 function setDriver(name, phone){
   if(name || phone){
     $("#driver").style.display="flex";
     $("#dname").textContent = name || "";
     const p = $("#dphone");
     if(phone){ p.textContent = phone; p.href = "tel:"+phone.replace(/\\s+/g,""); } else { p.textContent=""; p.removeAttribute("href"); }
-  } else {
-    $("#driver").style.display="none";
-  }
+  } else { $("#driver").style.display="none"; }
 }
-function setMeta(eta){
-  $("#meta").innerHTML = eta ? '<span class="pill">ETA: '+eta+' min</span>' : '';
-}
+function setMeta(eta){ $("#meta").innerHTML = eta ? '<span class="pill">ETA: '+eta+' min</span>' : ''; }
 function setMap(lat,lng){
   if(lat==null || lng==null){ $("#mapWrap").style.display="none"; return; }
   $("#mapWrap").style.display="block";
@@ -225,13 +207,11 @@ function setMap(lat,lng){
 }
 function setTimeline(items){
   const html = (items||[]).map(it => {
-    const ts = new Date(it.ts);
-    const t = ts.toLocaleString();
+    const t = new Date(it.ts).toLocaleString();
     return '<li>'+it.label+' <span class="time">'+t+'</span></li>';
   }).join("");
   $("#tl").innerHTML = html || '<li>No updates yet.</li>';
 }
-
 function render(data){
   const st = data.status;
   if(st==="accepted") setStatus("✅ Driver accepted your order");
@@ -249,22 +229,20 @@ function render(data){
 // initial snapshot
 fetch("/api/tracking?order="+encodeURIComponent(order)).then(r=>r.json()).then(render).catch(()=>{});
 
-// live updates via Server-Sent Events
+// live updates via SSE
 const es = new EventSource("/events?order="+encodeURIComponent(order));
-es.onmessage = (e) => {
-  try { render(JSON.parse(e.data)); } catch(_){}
-};
+es.onmessage = (e) => { try { render(JSON.parse(e.data)); } catch(_){} };
 </script>
 
 </body></html>`);
 });
 
-/** ===== Simple mock endpoints for manual testing ===== */
+// Simple mock endpoints for manual testing
 app.get("/api/mock/:order/:status", (req, res) => {
   const order = req.params.order;
   const st = req.params.status;
-  const label = statusToLabel(st);
-  upsert(order, { status: st }, label || ("Status: "+st));
+  const label = statusToLabel(st) || ("Status: "+st);
+  upsert(order, { status: st }, label);
   res.json({ ok: true, order, status: st });
 });
 
